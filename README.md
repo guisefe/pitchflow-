@@ -4,6 +4,9 @@
 > Kafka · Spark Structured Streaming · Delta Lake · Streamlit · StatsBomb
 
 ![CI](https://github.com/guisefe/pitchflow/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![License: MIT](https://img.shields.io/github/license/guisefe/pitchflow)
+![Last commit](https://img.shields.io/github/last-commit/guisefe/pitchflow)
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/guisefe/pitchflow)
 
 ---
@@ -76,6 +79,42 @@ StatsBomb Open Data (eventos reais, gratuito)
 | Dados | **StatsBomb Open Data** | Gratuito, real, com xG e coordenadas. Único dataset público com essa granularidade. |
 
 A spec completa de requisitos, riscos e trade-offs está em [`docs/PROJECT.md`](docs/PROJECT.md).
+
+---
+
+## Infrastructure
+
+```yaml
+# docker-compose.yml
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.1.7
+    command:
+      - redpanda start
+      - --smp 1 --memory 1G --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports: ["19092:19092", "9644:9644"]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+
+  console:
+    image: redpandadata/console:v2.6.0
+    depends_on: [redpanda]
+    ports: ["8080:8080"]
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+```
+
+**Notas de design:**
+
+- **Redpanda over Kafka.** Single binary, no ZooKeeper, no KRaft setup. Same wire protocol, fraction of the memory — fits in a Codespace.
+- **Explicit memory cap.** `--memory 1G` declared upfront — não fica brigando com defaults imprevisíveis.
+- **Real healthcheck, not `sleep`.** `make up` espera `Healthy: true` antes de criar o tópico.
+- **Split listeners.** Internal (`redpanda:9092`) pra clientes dentro da rede Docker, external (`localhost:19092`) pro host. Evita a pegadinha mais comum de Kafka em Docker.
+
+O ambiente de desenvolvimento está declarado em `.devcontainer/devcontainer.json` (Python 3.11, JDK 17, port forwarding). Abrir o repo em Codespaces é o único setup necessário.
 
 ---
 
@@ -183,5 +222,5 @@ Dados de futebol fornecidos pelo **StatsBomb** via [open-data](https://github.co
 
 ## Autor
 
-**Guilherme Senis O. Fernandes** — Data & AI Engineer · Bauru, Brasil
+**Guilherme Senis O. Fernandes** — Data & AI Engineer · Londrina, Brasil
 [github.com/guisefe](https://github.com/guisefe) · gui.senis635@gmail.com
