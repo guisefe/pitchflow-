@@ -47,3 +47,7 @@ silver:
 
 test:
 	python -m pytest streaming/tests/ producer/tests/ -v --tb=short
+
+.PHONY: gold
+gold:
+	python -m streaming.gold
