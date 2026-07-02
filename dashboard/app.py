@@ -1,4 +1,9 @@
-"""pitchflow — live match analytics dashboard."""
+"""pitchflow — live match analytics dashboard.
+
+Professional design with hero scoreboard, shot map (mplsoccer), and stats bars.
+"""
+import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -6,193 +11,187 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from deltalake import DeltaTable
-from theme import apply_theme
 
-GOLD_DIR    = Path("data/delta/gold")
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from dashboard.theme import BG_PANEL, CYAN, LIME, TEXT_HI, TEXT_LO, apply_theme  # noqa: E402
+from dashboard.viz.shot_map import build_shot_map  # noqa: E402
+
+GOLD_DIR = Path("data/delta/gold")
 SILVER_PATH = Path("data/delta/silver/events")
-REFRESH_SECONDS = 3
-
-GOLD_SHOTS    = str(GOLD_DIR / "shots")
-GOLD_XG       = str(GOLD_DIR / "xg_timeline")
-GOLD_STATE    = str(GOLD_DIR / "match_state")
-GOLD_MOMENTUM = str(GOLD_DIR / "momentum")
 
 st.set_page_config(page_title="pitchflow", page_icon="\u26bd", layout="wide")
 apply_theme()
 
 
+def render_html(html: str) -> None:
+    """Render HTML in Streamlit, stripping Python's indentation first.
+
+    Markdown treats 4+ leading spaces as a code block. Since our HTML
+    lives inside indented Python functions, we must dedent it before
+    st.markdown() sees it -- otherwise it renders as literal text
+    instead of an actual scoreboard.
+    """
+    st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+
+
+@st.cache_data(ttl=3)
 def load(path):
-    """Load a Delta table into pandas — returns empty DataFrame on failure."""
+    """Load a Delta table into pandas. Cache for 3 seconds."""
     try:
-        return DeltaTable(path).to_pandas()
+        return DeltaTable(str(path)).to_pandas()
     except Exception:
         return pd.DataFrame()
 
 
-def pitch_figure(title=""):
-    fig = go.Figure()
-    fig.update_layout(
-        title=title,
-        xaxis=dict(range=[-2, 122], showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(range=[-2, 82], showgrid=False, zeroline=False,
-                   showticklabels=False, scaleanchor="x"),
-        paper_bgcolor="#1a6b2a",
-        plot_bgcolor="#1a6b2a",
-        margin=dict(l=0, r=0, t=30, b=0),
-        height=400,
-        showlegend=True,
-    )
-    W = dict(color="white", width=2)
-
-    def line(x0, y0, x1, y1):
-        fig.add_shape(type="line", x0=x0, y0=y0, x1=x1, y1=y1, line=W)
-
-    def rect(x0, y0, x1, y1):
-        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, line=W)
-
-    rect(0, 0, 120, 80)
-    line(60, 0, 60, 80)
-    fig.add_shape(type="circle", x0=54, y0=34, x1=66, y1=46, line=W)
-    rect(0, 18, 18, 62)
-    rect(0, 30, 6, 50)
-    rect(102, 18, 120, 62)
-    rect(114, 30, 120, 50)
-
-    G = dict(color="yellow", width=3)
-    fig.add_shape(type="rect", x0=-2, y0=36, x1=0, y1=44, line=G)
-    fig.add_shape(type="rect", x0=120, y0=36, x1=122, y1=44, line=G)
-    return fig
-
-
-def render_kpi(state, momentum):
-    if state.empty:
-        st.info("Waiting for data. Run: make up && make bronze && make silver "
-                "&& make gold (in 3 terminals) then make replay")
+def render_hero(state: pd.DataFrame) -> None:
+    """Large, clear scoreboard at top. Sets visual hierarchy."""
+    if state.empty or len(state) != 2:
+        st.warning(
+            "\u23f3 Waiting for data... Run: make up && make bronze && "
+            "make silver && make gold && make replay"
+        )
         return
 
-    teams = state["team_name"].tolist()
-    t1, t2 = (teams[0], teams[1]) if len(teams) > 1 else (teams[0], "?")
+    t1_name, t2_name = state["team_name"].iloc[0], state["team_name"].iloc[1]
+    t1 = state[state["team_name"] == t1_name].iloc[0]
+    t2 = state[state["team_name"] == t2_name].iloc[0]
 
-    def val(team, col, default=0):
-        r = state[state["team_name"] == team]
-        return r[col].iloc[0] if not r.empty and col in r else default
+    html = f"""
+    <div style="background: linear-gradient(90deg, rgba(57,255,20,0.1) 0%, rgba(10,15,10,0.95) 50%, rgba(34,211,238,0.1) 100%); border: 1px solid #3a4a3f; border-radius: 12px; padding: 32px 24px; margin-bottom: 24px;">
+        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 12px; letter-spacing: 0.12em; text-transform: uppercase; text-align: center;">
+            2022 FIFA World Cup Final &middot; REPLAY MODE
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 120px 1fr; gap: 24px; align-items: center; text-align: center;">
+            <div>
+                <div style="font-size: 56px; font-weight: 700; color: #39FF14; font-family: 'JetBrains Mono', monospace; line-height: 1;">{int(t1['goals'])}</div>
+                <div style="font-size: 16px; color: #f8fafc; margin-top: 12px; font-weight: 600;">{t1_name.upper()}</div>
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 6px;">xG {float(t1['xg_total']):.2f}</div>
+            </div>
+            <div>
+                <div style="font-size: 20px; color: #cbd5e1; font-weight: 300;">90'+{max(0, int(t1['latest_minute']) - 90)}'</div>
+                <div style="font-size: 10px; color: #64748b; margin-top: 8px; text-transform: uppercase;">60&times; Speed</div>
+            </div>
+            <div>
+                <div style="font-size: 56px; font-weight: 700; color: #22d3ee; font-family: 'JetBrains Mono', monospace; line-height: 1;">{int(t2['goals'])}</div>
+                <div style="font-size: 16px; color: #f8fafc; margin-top: 12px; font-weight: 600;">{t2_name.upper()}</div>
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 6px;">xG {float(t2['xg_total']):.2f}</div>
+            </div>
+        </div>
+    </div>
+    """
+    render_html(html)
 
-    g1, g2 = int(val(t1, "goals")), int(val(t2, "goals"))
-    x1 = round(float(val(t1, "xg_total")), 2)
-    x2 = round(float(val(t2, "xg_total")), 2)
-    p1 = round(float(val(t1, "win_probability", 0.5)) * 100, 1)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric(f"\u26bd {t1}", g1)
-        st.caption(f"xG {x1}")
-    with c2:
-        st.metric(f"\u26bd {t2}", g2)
-        st.caption(f"xG {x2}")
-    with c3:
-        st.markdown("**Win probability**")
-        st.progress(p1 / 100, text=f"{t1} {p1}% \u2014 {t2} {round(100 - p1, 1)}%")
-        if not momentum.empty:
-            st.markdown("**Momentum (last 5 min)**")
-            d1 = momentum[momentum["team_name"] == t1]["dominance_pct"]
-            dom = float(d1.iloc[0]) if not d1.empty else 0.5
-            st.progress(dom, text=f"{t1} {int(dom*100)}% \u2014 {t2} {int((1-dom)*100)}%")
-
-
-def render_xg_race(xg):
-    if xg.empty:
-        st.caption("xG data not yet available.")
+def render_stats_bars(state: pd.DataFrame) -> None:
+    """Shot count comparison -- total shots and shots on target."""
+    if state.empty or len(state) != 2:
         return
-    teams = sorted(xg["team_name"].unique())
-    fig = go.Figure()
-    for team in teams:
-        t = xg[xg["team_name"] == team].sort_values("minute")
-        t = t.assign(xg_cumulative=t["xg_total"].cumsum())
-        fig.add_trace(go.Scatter(
-            x=t["minute"], y=t["xg_cumulative"],
-            mode="lines", name=team,
-            line=dict(width=3),
-        ))
-    fig.update_layout(
-        xaxis_title="Minute", yaxis_title="Cumulative xG",
-        height=300, margin=dict(l=0, r=0, t=30, b=0),
-    )
-    st.plotly_chart(fig, use_container_width=True)
+
+    t1_name = state["team_name"].iloc[0]
+    t2_name = state["team_name"].iloc[1]
+
+    shots_all = load(GOLD_DIR / "shots")
+    on_target = {"Goal", "Saved"}
+
+    def counts(team):
+        t = shots_all[shots_all["team_name"] == team]
+        total = len(t)
+        target = len(t[t["shot_outcome"].isin(on_target)])
+        return total, target
+
+    total1, target1 = counts(t1_name) if not shots_all.empty else (0, 0)
+    total2, target2 = counts(t2_name) if not shots_all.empty else (0, 0)
+
+    html = f"""
+    <div style="background: {BG_PANEL}; border: 1px solid #3a4a3f; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+        <div style="display: grid; grid-template-columns: 1fr 160px 1fr; gap: 20px; align-items: center; margin-bottom: 14px;">
+            <div style="text-align: right;">
+                <div style="font-size: 28px; font-weight: 700; color: #39FF14; font-family: 'JetBrains Mono', monospace;">{total1}</div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; text-transform: uppercase;">Total Shots</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Shots</div>
+            </div>
+            <div>
+                <div style="font-size: 28px; font-weight: 700; color: #22d3ee; font-family: 'JetBrains Mono', monospace;">{total2}</div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; text-transform: uppercase;">Total Shots</div>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 160px 1fr; gap: 20px; align-items: center;">
+            <div style="text-align: right;">
+                <div style="font-size: 28px; font-weight: 700; color: #39FF14; font-family: 'JetBrains Mono', monospace;">{target1}</div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; text-transform: uppercase;">On Target</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Accuracy</div>
+            </div>
+            <div>
+                <div style="font-size: 28px; font-weight: 700; color: #22d3ee; font-family: 'JetBrains Mono', monospace;">{target2}</div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; text-transform: uppercase;">On Target</div>
+            </div>
+        </div>
+    </div>
+    """
+    render_html(html)
 
 
-def render_shot_map(shots):
-    fig = pitch_figure("Shot Map")
-    if not shots.empty:
-        outcome_colour = {
-            "Goal": "gold", "Saved": "dodgerblue", "Off T": "tomato",
-            "Blocked": "orange", "Wayward": "grey", "Post": "orchid",
-        }
-        for team in sorted(shots["team_name"].unique()):
-            t = shots[shots["team_name"] == team]
-            for outcome, oc in outcome_colour.items():
-                o = t[t["shot_outcome"] == outcome]
-                if o.empty:
-                    continue
+# ============================================================================
+# MAIN UI
+# ============================================================================
+
+st.title("\u26bd pitchflow")
+st.caption("Real-time football match analytics \u00b7 2022 World Cup Final")
+st.divider()
+
+state = load(GOLD_DIR / "match_state")
+shots = load(GOLD_DIR / "shots")
+xg = load(GOLD_DIR / "xg_timeline")
+
+render_hero(state)
+render_stats_bars(state)
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Shot Map")
+    if not shots.empty and not state.empty:
+        t1_name = state["team_name"].iloc[0]
+        t2_name = state["team_name"].iloc[1]
+        fig = build_shot_map(shots, t1_name, t2_name)
+        st.pyplot(fig, use_container_width=True)
+    else:
+        st.info("Shots data not available yet.")
+
+with col2:
+    st.subheader("xG Race")
+    if not xg.empty:
+        fig = go.Figure()
+        for team, colour in [
+            (state["team_name"].iloc[0] if not state.empty else "Team 1", LIME),
+            (state["team_name"].iloc[1] if not state.empty else "Team 2", CYAN),
+        ]:
+            t = xg[xg["team_name"] == team].sort_values("minute")
+            if not t.empty:
+                t = t.assign(xg_cumulative=t["xg_total"].cumsum())
                 fig.add_trace(go.Scatter(
-                    x=o["loc_x"], y=o["loc_y"], mode="markers",
-                    name=f"{team} \u2014 {outcome}",
-                    marker=dict(
-                        size=o["xg"] * 60 + 6,
-                        color=oc, opacity=0.8,
-                        line=dict(color="white", width=1),
-                    ),
-                    hovertemplate="<b>%{text}</b><br>xG: %{customdata:.3f}<extra></extra>",
-                    text=o["player_name"],
-                    customdata=o["xg"],
+                    x=t["minute"], y=t["xg_cumulative"],
+                    mode="lines", name=team,
+                    line=dict(color=colour, width=3),
                 ))
-    st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(
+            xaxis_title="Minute", yaxis_title="Cumulative xG",
+            paper_bgcolor=BG_PANEL, plot_bgcolor=BG_PANEL,
+            font=dict(color=TEXT_HI),
+            height=400, margin=dict(l=0, r=0, t=30, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("xG data not available yet.")
 
-
-def render_event_log():
-    silver = load(str(SILVER_PATH))
-    if silver.empty:
-        return
-    cols = [c for c in ["minute", "second", "team_name", "player_name",
-                        "event_type", "xg"] if c in silver.columns]
-    st.dataframe(
-        silver.sort_values("match_second", ascending=False).head(20)[cols],
-        hide_index=True, use_container_width=True,
-    )
-
-
-st.title("\u26bd pitchflow \u2014 Live Match Analytics")
-st.caption("Argentina vs France \u00b7 2022 World Cup Final \u00b7 StatsBomb open data")
-
-placeholder = st.empty()
-
-while True:
-    state = load(GOLD_STATE)
-    xg = load(GOLD_XG)
-    shots = load(GOLD_SHOTS)
-    momentum = load(GOLD_MOMENTUM)
-
-    with placeholder.container():
-        render_kpi(state, momentum)
-        st.divider()
-
-        left, right = st.columns(2)
-        with left:
-            st.subheader("xG Race")
-            render_xg_race(xg)
-        with right:
-            st.subheader("Shot Map")
-            render_shot_map(shots)
-
-        st.divider()
-        st.subheader("Live Event Log (last 20)")
-        render_event_log()
-
-        try:
-            version = DeltaTable(str(SILVER_PATH)).version()
-        except Exception:
-            version = "\u2014"
-
-        st.caption(f"Refreshes every {REFRESH_SECONDS}s \u00b7 "
-                   f"Shots: {len(shots)} \u00b7 Silver v{version}")
-
-    time.sleep(REFRESH_SECONDS)
+st.divider()
+st.caption(
+    "Streaming architecture: Kafka (Redpanda) \u2192 Spark Structured Streaming "
+    "\u2192 Delta Lake \u2192 Live Dashboard"
+)
