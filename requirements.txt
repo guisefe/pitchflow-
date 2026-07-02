@@ -21,3 +21,8 @@ python-dotenv==1.0.1
 # Quality & testing
 pytest==8.2.0
 pytest-cov==5.0.0
+
+# Football visualization (pins resolve numpy/scipy/streamlit conflict)
+mplsoccer==1.4.0
+numpy<2
+scipy<1.14

@@ -222,5 +222,5 @@ Dados de futebol fornecidos pelo **StatsBomb** via [open-data](https://github.co
 
 ## Autor
 
-**Guilherme Senis O. Fernandes** — Data & AI Engineer · Londrina, Brasil
+**Guilherme Senis O. Fernandes** — Data & AI Engineer · Bauru, Brasil
 [github.com/guisefe](https://github.com/guisefe) · gui.senis635@gmail.com

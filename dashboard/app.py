@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from deltalake import DeltaTable
+from theme import apply_theme
 
 GOLD_DIR    = Path("data/delta/gold")
 SILVER_PATH = Path("data/delta/silver/events")
@@ -17,6 +18,7 @@ GOLD_STATE    = str(GOLD_DIR / "match_state")
 GOLD_MOMENTUM = str(GOLD_DIR / "momentum")
 
 st.set_page_config(page_title="pitchflow", page_icon="\u26bd", layout="wide")
+apply_theme()
 
 
 def load(path):
@@ -102,20 +104,17 @@ def render_xg_race(xg):
         st.caption("xG data not yet available.")
         return
     teams = sorted(xg["team_name"].unique())
-    colours = ["#75aadb", "#ffffff"]
     fig = go.Figure()
-    for team, colour in zip(teams, colours):
+    for team in teams:
         t = xg[xg["team_name"] == team].sort_values("minute")
         t = t.assign(xg_cumulative=t["xg_total"].cumsum())
         fig.add_trace(go.Scatter(
             x=t["minute"], y=t["xg_cumulative"],
             mode="lines", name=team,
-            line=dict(color=colour, width=3),
+            line=dict(width=3),
         ))
     fig.update_layout(
         xaxis_title="Minute", yaxis_title="Cumulative xG",
-        paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-        font=dict(color="white"),
         height=300, margin=dict(l=0, r=0, t=30, b=0),
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -124,12 +123,11 @@ def render_xg_race(xg):
 def render_shot_map(shots):
     fig = pitch_figure("Shot Map")
     if not shots.empty:
-        colours_t = ["#75aadb", "#ffffff"]
         outcome_colour = {
             "Goal": "gold", "Saved": "dodgerblue", "Off T": "tomato",
             "Blocked": "orange", "Wayward": "grey", "Post": "orchid",
         }
-        for team, tc in zip(sorted(shots["team_name"].unique()), colours_t):
+        for team in sorted(shots["team_name"].unique()):
             t = shots[shots["team_name"] == team]
             for outcome, oc in outcome_colour.items():
                 o = t[t["shot_outcome"] == outcome]
@@ -141,7 +139,7 @@ def render_shot_map(shots):
                     marker=dict(
                         size=o["xg"] * 60 + 6,
                         color=oc, opacity=0.8,
-                        line=dict(color=tc, width=1),
+                        line=dict(color="white", width=1),
                     ),
                     hovertemplate="<b>%{text}</b><br>xG: %{customdata:.3f}<extra></extra>",
                     text=o["player_name"],
