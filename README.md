@@ -202,6 +202,18 @@ Esse é o tipo de raciocínio que defendo numa entrevista.
 
 ---
 
+## Considerações de Produção
+
+Esse projeto roda em modo replay, com 1 partida, num ambiente controlado (Codespace/Docker local). Rodar em produção de verdade, com dado ao vivo e múltiplas partidas simultâneas, exigiria decisões adicionais:
+
+**Escala.** Hoje o Spark processa 1 stream, 1 partida. Pra múltiplas partidas simultâneas, cada uma teria seu próprio tópico Kafka (`match.events.{match_id}`) e os dados no Delta seriam particionados por `match_id`. O gargalo real não seria o Kafka — ele escala horizontalmente sem esforço — seria o cluster Spark, que precisaria de auto-scaling (em Databricks, isso é nativo via Jobs Compute).
+
+**Confiabilidade.** O pipeline já foi projetado pra sobreviver a falhas: o Delta Lake garante transações ACID, então se o Spark cair no meio de um `MERGE`, a transação simplesmente não é commitada. Ao reiniciar, o job lê o checkpoint (`data/checkpoints/`) e retoma exatamente do último micro-batch processado com sucesso — sem duplicar dado, graças ao par `txnAppId`/`txnVersion` usado na escrita da camada Silver.
+
+**Observabilidade.** Hoje, a única forma de saber se o pipeline travou é olhar o terminal. Em produção isso seria substituído por métricas expostas via Spark UI, alimentando um painel de monitoramento (Prometheus/Grafana, ou Databricks SQL Alerts) — com alerta automático se o volume de linhas processadas por minuto cair a zero.
+
+**Governança de dados.** Os dados usados aqui são públicos (StatsBomb Open Data), sem PII. Num cenário real com dados sensíveis, a camada Bronze precisaria de controle de acesso via Unity Catalog (ou equivalente), e a camada Silver aplicaria mascaramento/anonimização antes de qualquer exposição em dashboard.
+
 ## Roadmap
 
 - ✅ Producer + replay (Fase 1)
